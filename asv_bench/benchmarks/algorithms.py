@@ -3,122 +3,173 @@ from importlib import import_module
 import numpy as np
 
 import pandas as pd
-from pandas.util import testing as tm
 
-for imp in ['pandas.util', 'pandas.tools.hashing']:
+from .pandas_vb_common import tm
+
+for imp in ["pandas.util", "pandas.tools.hashing"]:
     try:
         hashing = import_module(imp)
         break
-    except:
+    except (ImportError, TypeError, ValueError):
         pass
 
-class Algorithms(object):
-    goal_time = 0.2
 
-    def setup(self):
-        N = 100000
-        np.random.seed(1234)
+class Factorize:
 
-        self.int_unique = pd.Int64Index(np.arange(N * 5))
+    params = [
+        [True, False],
+        [True, False],
+        [
+            "int",
+            "uint",
+            "float",
+            "string",
+            "datetime64[ns]",
+            "datetime64[ns, tz]",
+            "Int64",
+            "boolean",
+            "string_arrow",
+        ],
+    ]
+    param_names = ["unique", "sort", "dtype"]
+
+    def setup(self, unique, sort, dtype):
+        N = 10 ** 5
+        string_index = tm.makeStringIndex(N)
+        try:
+            from pandas.core.arrays.string_arrow import ArrowStringDtype
+
+            string_arrow = pd.array(string_index, dtype=ArrowStringDtype())
+        except ImportError:
+            string_arrow = None
+
+        if dtype == "string_arrow" and not string_arrow:
+            raise NotImplementedError
+
+        data = {
+            "int": pd.Int64Index(np.arange(N)),
+            "uint": pd.UInt64Index(np.arange(N)),
+            "float": pd.Float64Index(np.random.randn(N)),
+            "string": string_index,
+            "datetime64[ns]": pd.date_range("2011-01-01", freq="H", periods=N),
+            "datetime64[ns, tz]": pd.date_range(
+                "2011-01-01", freq="H", periods=N, tz="Asia/Tokyo"
+            ),
+            "Int64": pd.array(np.arange(N), dtype="Int64"),
+            "boolean": pd.array(np.random.randint(0, 2, N), dtype="boolean"),
+            "string_arrow": string_arrow,
+        }[dtype]
+        if not unique:
+            data = data.repeat(5)
+        self.data = data
+
+    def time_factorize(self, unique, sort, dtype):
+        pd.factorize(self.data, sort=sort)
+
+
+class Duplicated:
+
+    params = [
+        [True, False],
+        ["first", "last", False],
+        ["int", "uint", "float", "string", "datetime64[ns]", "datetime64[ns, tz]"],
+    ]
+    param_names = ["unique", "keep", "dtype"]
+
+    def setup(self, unique, keep, dtype):
+        N = 10 ** 5
+        data = {
+            "int": pd.Int64Index(np.arange(N)),
+            "uint": pd.UInt64Index(np.arange(N)),
+            "float": pd.Float64Index(np.random.randn(N)),
+            "string": tm.makeStringIndex(N),
+            "datetime64[ns]": pd.date_range("2011-01-01", freq="H", periods=N),
+            "datetime64[ns, tz]": pd.date_range(
+                "2011-01-01", freq="H", periods=N, tz="Asia/Tokyo"
+            ),
+        }[dtype]
+        if not unique:
+            data = data.repeat(5)
+        self.idx = data
         # cache is_unique
-        self.int_unique.is_unique
+        self.idx.is_unique
 
-        self.int = pd.Int64Index(np.arange(N).repeat(5))
-        self.float = pd.Float64Index(np.random.randn(N).repeat(5))
-
-        # Convenience naming.
-        self.checked_add = pd.core.algorithms.checked_add_with_arr
-
-        self.arr = np.arange(1000000)
-        self.arrpos = np.arange(1000000)
-        self.arrneg = np.arange(-1000000, 0)
-        self.arrmixed = np.array([1, -1]).repeat(500000)
-        self.strings = tm.makeStringIndex(100000)
-
-        self.arr_nan = np.random.choice([True, False], size=1000000)
-        self.arrmixed_nan = np.random.choice([True, False], size=1000000)
-
-        # match
-        self.uniques = tm.makeStringIndex(1000).values
-        self.all = self.uniques.repeat(10)
-
-    def time_factorize_string(self):
-        self.strings.factorize()
-
-    def time_factorize_int(self):
-        self.int.factorize()
-
-    def time_factorize_float(self):
-        self.int.factorize()
-
-    def time_duplicated_int_unique(self):
-        self.int_unique.duplicated()
-
-    def time_duplicated_int(self):
-        self.int.duplicated()
-
-    def time_duplicated_float(self):
-        self.float.duplicated()
-
-    def time_match_strings(self):
-        pd.match(self.all, self.uniques)
-
-    def time_add_overflow_pos_scalar(self):
-        self.checked_add(self.arr, 1)
-
-    def time_add_overflow_neg_scalar(self):
-        self.checked_add(self.arr, -1)
-
-    def time_add_overflow_zero_scalar(self):
-        self.checked_add(self.arr, 0)
-
-    def time_add_overflow_pos_arr(self):
-        self.checked_add(self.arr, self.arrpos)
-
-    def time_add_overflow_neg_arr(self):
-        self.checked_add(self.arr, self.arrneg)
-
-    def time_add_overflow_mixed_arr(self):
-        self.checked_add(self.arr, self.arrmixed)
-
-    def time_add_overflow_first_arg_nan(self):
-        self.checked_add(self.arr, self.arrmixed, arr_mask=self.arr_nan)
-
-    def time_add_overflow_second_arg_nan(self):
-        self.checked_add(self.arr, self.arrmixed, b_mask=self.arrmixed_nan)
-
-    def time_add_overflow_both_arg_nan(self):
-        self.checked_add(self.arr, self.arrmixed, arr_mask=self.arr_nan,
-                         b_mask=self.arrmixed_nan)
+    def time_duplicated(self, unique, keep, dtype):
+        self.idx.duplicated(keep=keep)
 
 
-class Hashing(object):
-    goal_time = 0.2
+class Hashing:
+    def setup_cache(self):
+        N = 10 ** 5
 
-    def setup(self):
-        N = 100000
+        df = pd.DataFrame(
+            {
+                "strings": pd.Series(
+                    tm.makeStringIndex(10000).take(np.random.randint(0, 10000, size=N))
+                ),
+                "floats": np.random.randn(N),
+                "ints": np.arange(N),
+                "dates": pd.date_range("20110101", freq="s", periods=N),
+                "timedeltas": pd.timedelta_range("1 day", freq="s", periods=N),
+            }
+        )
+        df["categories"] = df["strings"].astype("category")
+        df.iloc[10:20] = np.nan
+        return df
 
-        self.df = pd.DataFrame(
-            {'A': pd.Series(tm.makeStringIndex(100).take(
-                np.random.randint(0, 100, size=N))),
-             'B': pd.Series(tm.makeStringIndex(10000).take(
-                 np.random.randint(0, 10000, size=N))),
-             'D': np.random.randn(N),
-             'E': np.arange(N),
-             'F': pd.date_range('20110101', freq='s', periods=N),
-             'G': pd.timedelta_range('1 day', freq='s', periods=N),
-             })
-        self.df['C'] = self.df['B'].astype('category')
-        self.df.iloc[10:20] = np.nan
+    def time_frame(self, df):
+        hashing.hash_pandas_object(df)
 
-    def time_frame(self):
-        hashing.hash_pandas_object(self.df)
+    def time_series_int(self, df):
+        hashing.hash_pandas_object(df["ints"])
 
-    def time_series_int(self):
-        hashing.hash_pandas_object(self.df.E)
+    def time_series_string(self, df):
+        hashing.hash_pandas_object(df["strings"])
 
-    def time_series_string(self):
-        hashing.hash_pandas_object(self.df.B)
+    def time_series_float(self, df):
+        hashing.hash_pandas_object(df["floats"])
 
-    def time_series_categorical(self):
-        hashing.hash_pandas_object(self.df.C)
+    def time_series_categorical(self, df):
+        hashing.hash_pandas_object(df["categories"])
+
+    def time_series_timedeltas(self, df):
+        hashing.hash_pandas_object(df["timedeltas"])
+
+    def time_series_dates(self, df):
+        hashing.hash_pandas_object(df["dates"])
+
+
+class Quantile:
+    params = [
+        [0, 0.5, 1],
+        ["linear", "nearest", "lower", "higher", "midpoint"],
+        ["float", "int", "uint"],
+    ]
+    param_names = ["quantile", "interpolation", "dtype"]
+
+    def setup(self, quantile, interpolation, dtype):
+        N = 10 ** 5
+        data = {
+            "int": np.arange(N),
+            "uint": np.arange(N).astype(np.uint64),
+            "float": np.random.randn(N),
+        }
+        self.idx = pd.Series(data[dtype].repeat(5))
+
+    def time_quantile(self, quantile, interpolation, dtype):
+        self.idx.quantile(quantile, interpolation=interpolation)
+
+
+class SortIntegerArray:
+    params = [10 ** 3, 10 ** 5]
+
+    def setup(self, N):
+        data = np.arange(N, dtype=float)
+        data[40] = np.nan
+        self.array = pd.array(data, dtype="Int64")
+
+    def time_argsort(self, N):
+        self.array.argsort()
+
+
+from .pandas_vb_common import setup  # noqa: F401 isort:skip

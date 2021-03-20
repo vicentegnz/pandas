@@ -1,7 +1,6 @@
-tseries: pandas/_libs/lib.pyx pandas/_libs/tslib.pyx pandas/_libs/hashtable.pyx
-	python setup.py build_ext --inplace
+.PHONY : develop build clean clean_pyc doc lint-diff black test-scripts
 
-.PHONY : develop build clean clean_pyc tseries doc
+all: develop
 
 clean:
 	-python setup.py clean
@@ -10,13 +9,22 @@ clean_pyc:
 	-find . -name '*.py[co]' -exec rm {} \;
 
 build: clean_pyc
-	python setup.py build_ext --inplace
+	python setup.py build_ext
+
+lint-diff:
+	git diff upstream/master --name-only -- "*.py" | xargs flake8
+
+black:
+	black .
 
 develop: build
-	-python setup.py develop
+	python -m pip install --no-build-isolation -e .
 
 doc:
 	-rm -rf doc/build doc/source/generated
 	cd doc; \
 	python make.py clean; \
 	python make.py html
+
+test-scripts:
+	pytest scripts

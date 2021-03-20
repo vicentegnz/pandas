@@ -4,88 +4,76 @@ Template for functions of IndexEngine subclasses.
 WARNING: DO NOT edit .pxi FILE directly, .pxi is generated from .pxi.in
 """
 
-#----------------------------------------------------------------------
+# ----------------------------------------------------------------------
 # IndexEngine Subclass Methods
-#----------------------------------------------------------------------
+# ----------------------------------------------------------------------
 
 {{py:
 
-# name, dtype, ctype
-dtypes = [('Float64', 'float64', 'float64_t'),
-          ('UInt64', 'uint64', 'uint64_t'),
-          ('Int64', 'int64', 'int64_t'),
-          ('Object', 'object', 'object')]
+# name, dtype
+dtypes = [('Float64', 'float64'),
+          ('Float32', 'float32'),
+          ('Int64', 'int64'),
+          ('Int32', 'int32'),
+          ('Int16', 'int16'),
+          ('Int8', 'int8'),
+          ('UInt64', 'uint64'),
+          ('UInt32', 'uint32'),
+          ('UInt16', 'uint16'),
+          ('UInt8', 'uint8'),
+          ]
 }}
 
-{{for name, dtype, ctype in dtypes}}
+{{for name, dtype in dtypes}}
 
 
 cdef class {{name}}Engine(IndexEngine):
+    # constructor-caller is responsible for ensuring that vgetter()
+    #  returns an ndarray with dtype {{dtype}}_t
 
-    def _call_monotonic(self, values):
-        return algos.is_monotonic_{{dtype}}(values, timelike=False)
-
-    def get_backfill_indexer(self, other, limit=None):
-        return algos.backfill_{{dtype}}(self._get_index_values(),
-                                        other, limit=limit)
-
-    def get_pad_indexer(self, other, limit=None):
-        return algos.pad_{{dtype}}(self._get_index_values(),
-                                   other, limit=limit)
-
-    cdef _make_hash_table(self, n):
-        {{if name == 'Object'}}
-        return _hash.PyObjectHashTable(n)
-        {{else}}
+    cdef _make_hash_table(self, Py_ssize_t n):
         return _hash.{{name}}HashTable(n)
-        {{endif}}
 
-    {{if name != 'Float64' and name != 'Object'}}
     cdef _check_type(self, object val):
-        hash(val)
-        if util.is_bool_object(val):
+    {{if name not in {'Float64', 'Float32'} }}
+        if not util.is_integer_object(val):
             raise KeyError(val)
-        elif util.is_float_object(val):
+    {{else}}
+        if util.is_bool_object(val):
+            # avoid casting to True -> 1.0
             raise KeyError(val)
     {{endif}}
 
-    {{if name != 'Object'}}
-    cdef _get_index_values(self):
-        return algos.ensure_{{dtype}}(self.vgetter())
+    cdef void _call_map_locations(self, values):
+        self.mapping.map_locations(algos.ensure_{{name.lower()}}(values))
 
     cdef _maybe_get_bool_indexer(self, object val):
         cdef:
-            ndarray[uint8_t, cast=True] indexer
-            ndarray[{{ctype}}] values
+            ndarray[uint8_t, ndim=1, cast=True] indexer
+            ndarray[intp_t, ndim=1] found
+            ndarray[{{dtype}}_t, ndim=1] values
             int count = 0
-            Py_ssize_t i, n
-            int last_true
 
-        {{if name != 'Float64'}}
-        if not util.is_integer_object(val):
-            raise KeyError(val)
-        {{endif}}
+        self._check_type(val)
 
         values = self._get_index_values()
-        n = len(values)
-
-        result = np.empty(n, dtype=bool)
-        indexer = result.view(np.uint8)
-
-        for i in range(n):
-            if values[i] == val:
-                count += 1
-                indexer[i] = 1
-                last_true = i
-            else:
-                indexer[i] = 0
-
-        if count == 0:
+        try:
+            with warnings.catch_warnings():
+                # e.g. if values is float64 and `val` is a str, suppress warning
+                warnings.filterwarnings("ignore", category=FutureWarning)
+                {{if name in {'Float64', 'Float32'} }}
+                if util.is_nan(val):
+                    indexer = np.isnan(values)
+                else:
+                    indexer = values == val
+                {{else}}
+                indexer = values == val
+                {{endif}}
+        except TypeError:
+            # if the equality above returns a bool, cython will raise TypeError
+            #  when trying to cast it to ndarray
             raise KeyError(val)
-        if count == 1:
-            return last_true
 
-        return result
-    {{endif}}
+        return self._unpack_bool_indexer(indexer, val)
 
 {{endfor}}
